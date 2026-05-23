@@ -15,6 +15,9 @@ obj/
 publish/
 out/
 
+# VS Code REST Client scratch files
+*.http
+
 # OS
 .DS_Store
 Thumbs.db
