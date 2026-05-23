@@ -1,0 +1,25 @@
+# Claude Code local settings
+.claude/
+
+# .NET build output
+bin/
+obj/
+*.user
+
+# SQLite databases (runtime files)
+*.db
+*.db-shm
+*.db-wal
+
+# dotnet publish output
+publish/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vs/
+.vscode/
+*.suo
