@@ -1,34 +1,135 @@
+using AccountService.Data;
+using AccountService.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using Serilog;
+using Serilog.Formatting.Compact;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console(new CompactJsonFormatter())
+    .Enrich.FromLogContext()
+    .Enrich.WithProperty("service", "account-service")
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+
+builder.Services.AddDbContext<AccountDbContext>(opts =>
+    opts.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? "Data Source=account.db"));
+
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("account-service"))
+        .AddAspNetCoreInstrumentation()
+        .AddConsoleExporter());
+
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AccountDbContext>("database");
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-
-app.UseHttpsRedirection();
-
-var summaries = new[]
+using (var scope = app.Services.CreateScope())
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var db = scope.ServiceProvider.GetRequiredService<AccountDbContext>();
+    db.Database.EnsureCreated();
+}
 
-app.MapGet("/weatherforecast", () =>
+app.MapGet("/health", async (HealthCheckService hcs) =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
+    var report = await hcs.CheckHealthAsync();
+    var ok = report.Status == HealthStatus.Healthy;
+    var body = new { status = ok ? "healthy" : "unhealthy", database = ok ? "ok" : "unavailable" };
+    return ok ? Results.Ok(body) : Results.Json(body, statusCode: 503);
+});
+
+// Idempotent on eventId — duplicate submissions return the original transaction unchanged
+app.MapPost("/accounts/{accountId}/transactions", async (
+    string accountId,
+    TransactionRequest req,
+    AccountDbContext db,
+    ILogger<Program> logger) =>
+{
+    if (string.IsNullOrWhiteSpace(req.EventId))
+        return Results.BadRequest(new { error = "eventId is required" });
+    if (req.Type != "CREDIT" && req.Type != "DEBIT")
+        return Results.BadRequest(new { error = "type must be CREDIT or DEBIT" });
+    if (req.Amount <= 0)
+        return Results.BadRequest(new { error = "amount must be greater than 0" });
+
+    var existing = await db.Transactions.FirstOrDefaultAsync(t => t.EventId == req.EventId);
+    if (existing != null)
+    {
+        logger.LogInformation("Duplicate transaction {EventId} for account {AccountId} — skipping", req.EventId, accountId);
+        return Results.Ok(existing);
+    }
+
+    // Auto-create account on first transaction
+    if (!await db.Accounts.AnyAsync(a => a.AccountId == accountId))
+        db.Accounts.Add(new Account { AccountId = accountId });
+
+    var tx = new Transaction
+    {
+        EventId = req.EventId,
+        AccountId = accountId,
+        Type = req.Type,
+        Amount = req.Amount,
+        Currency = req.Currency,
+        EventTimestamp = req.EventTimestamp,
+        ReceivedAt = DateTimeOffset.UtcNow
+    };
+
+    db.Transactions.Add(tx);
+
+    try
+    {
+        await db.SaveChangesAsync();
+    }
+    catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("UNIQUE") == true)
+    {
+        // Race condition: two identical requests arrived simultaneously — return the winner
+        logger.LogWarning("Concurrent duplicate for {EventId} — returning existing transaction", req.EventId);
+        existing = await db.Transactions.FirstOrDefaultAsync(t => t.EventId == req.EventId);
+        return Results.Ok(existing);
+    }
+
+    logger.LogInformation("Applied {Type} {Amount} {Currency} to {AccountId} via event {EventId}",
+        tx.Type, tx.Amount, tx.Currency, accountId, tx.EventId);
+
+    return Results.Created($"/accounts/{accountId}/transactions/{tx.Id}", tx);
+});
+
+// Balance computed as SUM(CREDITs) - SUM(DEBITs) — correct regardless of arrival order
+app.MapGet("/accounts/{accountId}/balance", async (string accountId, AccountDbContext db) =>
+{
+    if (!await db.Accounts.AnyAsync(a => a.AccountId == accountId))
+        return Results.NotFound(new { error = $"Account {accountId} not found" });
+
+    var transactions = await db.Transactions
+        .Where(t => t.AccountId == accountId)
+        .ToListAsync();
+
+    var currency = transactions.FirstOrDefault()?.Currency ?? "USD";
+    var balance = transactions.Sum(t => t.Type == "CREDIT" ? t.Amount : -t.Amount);
+
+    return Results.Ok(new { accountId, balance, currency });
+});
+
+// Account details with 20 most recent transactions ordered by event timestamp
+app.MapGet("/accounts/{accountId}", async (string accountId, AccountDbContext db) =>
+{
+    var account = await db.Accounts
+        .Include(a => a.Transactions.OrderByDescending(t => t.EventTimestamp).Take(20))
+        .FirstOrDefaultAsync(a => a.AccountId == accountId);
+
+    return account is null
+        ? Results.NotFound(new { error = $"Account {accountId} not found" })
+        : Results.Ok(account);
 });
 
 app.Run();
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+public partial class Program { }
