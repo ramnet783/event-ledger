@@ -63,8 +63,8 @@ jobs:
         run: |
           echo "Waiting for services..."
           for i in $(seq 1 30); do
-            gw=$(curl -sf http://localhost:5000/health && echo ok || echo fail)
-            as=$(curl -sf http://localhost:5001/health && echo ok || echo fail)
+            gw=$(curl -sf -o /dev/null http://localhost:5000/health && echo ok || echo fail)
+            as=$(curl -sf -o /dev/null http://localhost:5001/health && echo ok || echo fail)
             if [ "$gw" = "ok" ] && [ "$as" = "ok" ]; then
               echo "Both services healthy"
               exit 0
