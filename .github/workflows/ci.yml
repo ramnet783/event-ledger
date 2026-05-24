@@ -61,7 +61,7 @@ jobs:
       - name: Wait for services to be healthy
         run: |
           echo "Waiting for services..."
-          for i in $(seq 1 15); do
+          for i in $(seq 1 30); do
             gw=$(curl -sf http://localhost:5000/health && echo ok || echo fail)
             as=$(curl -sf http://localhost:5001/health && echo ok || echo fail)
             if [ "$gw" = "ok" ] && [ "$as" = "ok" ]; then
@@ -69,7 +69,7 @@ jobs:
               exit 0
             fi
             echo "Attempt $i — gateway=$gw account=$as"
-            sleep 3
+            sleep 5
           done
           echo "Services did not become healthy in time"
           docker compose logs
