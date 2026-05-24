@@ -1,5 +1,7 @@
 using AccountService.Data;
+using AccountService.Diagnostics;
 using AccountService.Models;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using OpenTelemetry.Resources;
@@ -13,6 +15,7 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.Console(new CompactJsonFormatter())
     .Enrich.FromLogContext()
     .Enrich.WithProperty("service", "account-service")
+    .Enrich.With<ActivityEnricher>()
     .CreateLogger();
 
 builder.Host.UseSerilog();
@@ -38,6 +41,21 @@ using (var scope = app.Services.CreateScope())
     db.Database.EnsureCreated();
 }
 
+// Outer: logs every request with method, path, status, and elapsed time
+app.UseSerilogRequestLogging();
+
+// Inner: catches any unhandled exception, logs it, and returns structured JSON 500
+app.UseExceptionHandler(exceptionApp =>
+    exceptionApp.Run(async context =>
+    {
+        var feature = context.Features.Get<IExceptionHandlerFeature>();
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        logger.LogError(feature?.Error, "Unhandled exception on {Method} {Path}",
+            context.Request.Method, context.Request.Path);
+        context.Response.StatusCode = 500;
+        await context.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred" });
+    }));
+
 app.MapGet("/health", async (HealthCheckService hcs) =>
 {
     var report = await hcs.CheckHealthAsync();
@@ -54,11 +72,19 @@ app.MapPost("/accounts/{accountId}/transactions", async (
     ILogger<Program> logger) =>
 {
     if (string.IsNullOrWhiteSpace(req.EventId))
+    {
         return Results.BadRequest(new { error = "eventId is required" });
+    }
+
     if (req.Type != "CREDIT" && req.Type != "DEBIT")
+    {
         return Results.BadRequest(new { error = "type must be CREDIT or DEBIT" });
+    }
+
     if (req.Amount <= 0)
+    {
         return Results.BadRequest(new { error = "amount must be greater than 0" });
+    }
 
     var existing = await db.Transactions.FirstOrDefaultAsync(t => t.EventId == req.EventId);
     if (existing != null)
@@ -69,7 +95,10 @@ app.MapPost("/accounts/{accountId}/transactions", async (
 
     // Auto-create account on first transaction
     if (!await db.Accounts.AnyAsync(a => a.AccountId == accountId))
+    {
         db.Accounts.Add(new Account { AccountId = accountId });
+        logger.LogInformation("Auto-created account {AccountId}", accountId);
+    }
 
     var tx = new Transaction
     {
@@ -79,7 +108,7 @@ app.MapPost("/accounts/{accountId}/transactions", async (
         Amount = req.Amount,
         Currency = req.Currency,
         EventTimestamp = req.EventTimestamp,
-        ReceivedAt = DateTimeOffset.UtcNow
+        ReceivedAt = DateTimeOffset.UtcNow,
     };
 
     db.Transactions.Add(tx);
@@ -106,7 +135,9 @@ app.MapPost("/accounts/{accountId}/transactions", async (
 app.MapGet("/accounts/{accountId}/balance", async (string accountId, AccountDbContext db) =>
 {
     if (!await db.Accounts.AnyAsync(a => a.AccountId == accountId))
+    {
         return Results.NotFound(new { error = $"Account {accountId} not found" });
+    }
 
     var transactions = await db.Transactions
         .Where(t => t.AccountId == accountId)
@@ -132,4 +163,7 @@ app.MapGet("/accounts/{accountId}", async (string accountId, AccountDbContext db
 
 app.Run();
 
-public partial class Program { }
+/// <summary>Entry point — required for WebApplicationFactory test access.</summary>
+public partial class Program
+{
+}

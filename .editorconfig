@@ -1,0 +1,72 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+indent_size = 4
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+
+# Naming conventions
+dotnet_naming_rule.interfaces_must_be_prefixed_with_I.symbols = interfaces
+dotnet_naming_rule.interfaces_must_be_prefixed_with_I.style = prefix_interface
+dotnet_naming_rule.interfaces_must_be_prefixed_with_I.severity = error
+
+dotnet_naming_symbols.interfaces.applicable_kinds = interface
+
+dotnet_naming_style.prefix_interface.required_prefix = I
+dotnet_naming_style.prefix_interface.capitalization = pascal_case
+
+# Private fields: _camelCase
+dotnet_naming_rule.private_fields_camel_case.symbols = private_fields
+dotnet_naming_rule.private_fields_camel_case.style = camel_case_underscore
+dotnet_naming_rule.private_fields_camel_case.severity = warning
+
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+
+dotnet_naming_style.camel_case_underscore.required_prefix = _
+dotnet_naming_style.camel_case_underscore.capitalization = camel_case
+
+# var preferences
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:suggestion
+
+# Expression-bodied members
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+
+# Null checks
+csharp_style_conditional_delegate_call = true:suggestion
+dotnet_style_null_propagation = true:suggestion
+dotnet_style_coalesce_expression = true:suggestion
+
+# Braces
+csharp_prefer_braces = true:warning
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# StyleCop suppressions — rules that conflict with modern minimal API / record style
+[*.cs]
+dotnet_diagnostic.SA1633.severity = none   # File header not required
+dotnet_diagnostic.SA1101.severity = none   # this. prefix not required in modern C#
+dotnet_diagnostic.SA1208.severity = none   # System using ordering handled by editorconfig
+dotnet_diagnostic.SA1209.severity = none   # Using alias directives ordering
+dotnet_diagnostic.SA1210.severity = none   # Using static ordering
+dotnet_diagnostic.SA1116.severity = none   # Parameter split — conflicts with minimal API style
+dotnet_diagnostic.SA1117.severity = none   # Parameter same line — conflicts with minimal API style
+dotnet_diagnostic.SA1313.severity = none   # Record parameter casing — conflicts with C# record syntax
+dotnet_diagnostic.SA1009.severity = none   # Closing parenthesis spacing
+dotnet_diagnostic.SA1111.severity = none   # Closing paren on same line
+dotnet_diagnostic.SA1128.severity = none   # Constructor initializer on own line
+dotnet_diagnostic.SA1516.severity = none   # False positive on top-level programs with partial class Program

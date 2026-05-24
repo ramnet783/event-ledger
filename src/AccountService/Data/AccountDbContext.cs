@@ -3,11 +3,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AccountService.Data;
 
+/// <summary>EF Core database context for the Account Service — owns Accounts and Transactions tables.</summary>
 public class AccountDbContext(DbContextOptions<AccountDbContext> options) : DbContext(options)
 {
+    /// <summary>Gets the set of financial accounts.</summary>
     public DbSet<Account> Accounts => Set<Account>();
+
+    /// <summary>Gets the set of applied transactions.</summary>
     public DbSet<Transaction> Transactions => Set<Transaction>();
 
+    /// <inheritdoc/>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Account>()
