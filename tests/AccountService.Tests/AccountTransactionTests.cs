@@ -105,6 +105,42 @@ public class AccountTransactionTests : IClassFixture<AccountTransactionTests.Fac
     }
 
     [Fact]
+    public async Task PostTransaction_MissingBody_Returns400WithErrorMessage()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/accounts/{Guid.NewGuid()}/transactions");
+        request.Content = new StringContent(string.Empty, System.Text.Encoding.UTF8, "application/json");
+
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Request body is required", body.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task PostTransaction_MissingCurrency_Returns400()
+    {
+        var response = await _client.PostAsJsonAsync(
+            $"/accounts/{Guid.NewGuid()}/transactions",
+            new { eventId = Guid.NewGuid().ToString(), type = "CREDIT", amount = 100m, currency = (string?)null, eventTimestamp = DateTimeOffset.UtcNow });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("currency is required", body.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task PostTransaction_LowercaseType_Returns400()
+    {
+        var response = await _client.PostAsJsonAsync(
+            $"/accounts/{Guid.NewGuid()}/transactions", Payload(type: "credit"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("type must be CREDIT or DEBIT", body.GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task PostTransaction_MissingEventTimestamp_Returns400()
     {
         var response = await _client.PostAsJsonAsync(

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -94,6 +95,8 @@ public class EventGatewayTests : IClassFixture<EventGatewayTests.Factory>
     [InlineData("",      "acc-1",  "CREDIT",  100,  "USD",  "eventId is required")]
     [InlineData("evt-1", null,     "CREDIT",  100,  "USD",  "accountId is required")]
     [InlineData("evt-1", "acc-1",  "WIRE",    100,  "USD",  "type must be CREDIT or DEBIT")]
+    [InlineData("evt-1", "acc-1",  "credit",  100,  "USD",  "type must be CREDIT or DEBIT")]
+    [InlineData("evt-1", "acc-1",  " ",       100,  "USD",  "type must be CREDIT or DEBIT")]
     [InlineData("evt-1", "acc-1",  "CREDIT",  0,    "USD",  "amount must be greater than 0")]
     [InlineData("evt-1", "acc-1",  "CREDIT",  -10,  "USD",  "amount must be greater than 0")]
     [InlineData("evt-1", "acc-1",  "CREDIT",  100,  null,   "currency is required")]
@@ -113,6 +116,19 @@ public class EventGatewayTests : IClassFixture<EventGatewayTests.Factory>
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(expectedError, body.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task PostEvent_MissingBody_Returns400WithErrorMessage()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/events");
+        request.Content = new StringContent(string.Empty, System.Text.Encoding.UTF8, "application/json");
+
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Request body is required", body.GetProperty("error").GetString());
     }
 
     [Fact]
@@ -220,6 +236,60 @@ public class EventGatewayTests : IClassFixture<EventGatewayTests.Factory>
         Assert.True(t0 < t1, "Events must be returned in ascending eventTimestamp order");
     }
 
+    // ── POST /events — Account Service contract mismatch ─────────────────
+
+    [Fact]
+    public async Task PostEvent_AccountServiceReturns400_Returns500NotServiceUnavailable()
+    {
+        // A 400 from the Account Service means a contract mismatch (Gateway sent something
+        // the Account Service rejected), not a transient outage. It must map to 500, not 503,
+        // so the caller can distinguish "service is down" from "something is misconfigured".
+        _factory.AccountClientMock
+            .Setup(c => c.ApplyTransactionAsync(It.IsAny<EventRecord>()))
+            .ThrowsAsync(new HttpRequestException("bad request", null, System.Net.HttpStatusCode.BadRequest));
+
+        var response = await _client.PostAsJsonAsync("/events", ValidPayload());
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+    }
+
+    // ── GET /accounts/{id}/balance — balance proxy ────────────────────────
+
+    [Fact]
+    public async Task GetBalance_AccountServiceAvailable_Returns200WithBalance()
+    {
+        var accountId = Guid.NewGuid().ToString();
+        var expected = JsonSerializer.SerializeToElement(
+            new { accountId, balance = 425.00m, currency = "USD" });
+
+        _factory.AccountClientMock
+            .Setup(c => c.GetBalanceAsync(accountId))
+            .ReturnsAsync(expected);
+
+        var response = await _client.GetAsync($"/accounts/{accountId}/balance");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(425.00m, body.GetProperty("balance").GetDecimal());
+        Assert.Equal(accountId, body.GetProperty("accountId").GetString());
+    }
+
+    [Fact]
+    public async Task GetBalance_AccountNotFound_Returns404()
+    {
+        var accountId = Guid.NewGuid().ToString();
+
+        _factory.AccountClientMock
+            .Setup(c => c.GetBalanceAsync(accountId))
+            .ThrowsAsync(new HttpRequestException("not found", null, HttpStatusCode.NotFound));
+
+        var response = await _client.GetAsync($"/accounts/{accountId}/balance");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("not found", body.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
     // ── GET /health ───────────────────────────────────────────────────────
 
     [Fact]
@@ -230,6 +300,67 @@ public class EventGatewayTests : IClassFixture<EventGatewayTests.Factory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("healthy", body.GetProperty("status").GetString());
+        Assert.Equal("ok", body.GetProperty("database").GetString());
+    }
+
+    // ── Custom metric ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task PostEvent_ValidRequest_IncrementsEventsAppliedCounter()
+    {
+        long captured = 0;
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Name == "event_gateway.events_applied")
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>(
+            (_, measurement, _, _) => Interlocked.Add(ref captured, measurement));
+        listener.Start();
+
+        await _client.PostAsJsonAsync("/events", ValidPayload());
+
+        Assert.Equal(1L, Volatile.Read(ref captured));
+    }
+
+    [Fact]
+    public async Task PostEvent_ValidRequest_MetricTaggedWithTransactionType()
+    {
+        string? capturedType = null;
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Name == "event_gateway.events_applied")
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            foreach (var tag in tags)
+            {
+                if (tag.Key == "type")
+                {
+                    Volatile.Write(ref capturedType, tag.Value?.ToString());
+                }
+            }
+        });
+        listener.Start();
+
+        await _client.PostAsJsonAsync("/events", new
+        {
+            eventId = Guid.NewGuid().ToString(),
+            accountId = Guid.NewGuid().ToString(),
+            type = "DEBIT",
+            amount = 50m,
+            currency = "USD",
+            eventTimestamp = DateTimeOffset.UtcNow,
+        });
+
+        Assert.Equal("DEBIT", capturedType);
     }
 
     // ── Tracing ───────────────────────────────────────────────────────────
@@ -250,6 +381,56 @@ public class EventGatewayTests : IClassFixture<EventGatewayTests.Factory>
 
         await _client.PostAsJsonAsync("/events", ValidPayload());
 
+        Assert.NotNull(capturedTraceId);
+        // Must be a valid W3C TraceId: 32 lowercase hex characters, not all zeros
+        Assert.Equal(32, capturedTraceId!.Length);
+        Assert.Matches("^[0-9a-f]{32}$", capturedTraceId);
+        Assert.NotEqual("00000000000000000000000000000000", capturedTraceId);
+    }
+
+    [Fact]
+    public async Task PostEvent_IncomingTraceparent_SameTraceIdReachesAccountServiceCall()
+    {
+        // When an upstream caller sends a W3C traceparent header the Gateway must create a
+        // child span with the *same* TraceId and hold it active when calling the Account
+        // Service — so a single client request is traceable end-to-end across all services.
+        const string incomingTraceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+        string? capturedTraceId = null;
+
+        _factory.AccountClientMock
+            .Setup(c => c.ApplyTransactionAsync(It.IsAny<EventRecord>()))
+            .Callback<EventRecord>(_ => capturedTraceId = Activity.Current?.TraceId.ToString())
+            .Returns(Task.CompletedTask);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/events");
+        request.Headers.Add("traceparent", $"00-{incomingTraceId}-00f067aa0ba902b7-01");
+        request.Content = System.Net.Http.Json.JsonContent.Create(ValidPayload());
+
+        await _client.SendAsync(request);
+
+        Assert.Equal(incomingTraceId, capturedTraceId);
+    }
+
+    [Fact]
+    public async Task PostEvent_AccountServiceDown_TraceIdStillActiveOnErrorPath()
+    {
+        // Even when the Account Service is unavailable (503 path), the OTel span must remain
+        // active so that the Gateway's warning log line carries a traceId for correlation.
+        string? capturedTraceId = null;
+
+        _factory.AccountClientMock
+            .Setup(c => c.ApplyTransactionAsync(It.IsAny<EventRecord>()))
+            .ThrowsAsync(new HttpRequestException("connection refused"));
+
+        // Capture the Activity that is current at the point the exception is thrown
+        _factory.AccountClientMock
+            .Setup(c => c.ApplyTransactionAsync(It.IsAny<EventRecord>()))
+            .Callback<EventRecord>(_ => capturedTraceId = Activity.Current?.TraceId.ToString())
+            .ThrowsAsync(new HttpRequestException("connection refused"));
+
+        var response = await _client.PostAsJsonAsync("/events", ValidPayload());
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.NotNull(capturedTraceId);
         Assert.NotEqual("00000000000000000000000000000000", capturedTraceId);
     }
