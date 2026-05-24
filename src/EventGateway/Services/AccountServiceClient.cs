@@ -1,9 +1,10 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using EventGateway.Models;
 
 namespace EventGateway.Services;
 
-/// <summary>Defines the contract for forwarding events to the Account Service.</summary>
+/// <summary>Defines the contract for communicating with the Account Service.</summary>
 public interface IAccountServiceClient
 {
     /// <summary>Applies a transaction to the Account Service for the given event.</summary>
@@ -11,6 +12,12 @@ public interface IAccountServiceClient
     /// <returns>A task that completes when the Account Service confirms the transaction.</returns>
     /// <exception cref="HttpRequestException">Thrown when the Account Service returns a non-success status.</exception>
     Task ApplyTransactionAsync(EventRecord ev);
+
+    /// <summary>Retrieves the current balance for an account from the Account Service.</summary>
+    /// <param name="accountId">The account identifier.</param>
+    /// <returns>The balance response proxied from the Account Service.</returns>
+    /// <exception cref="HttpRequestException">Thrown when the Account Service returns a non-success status.</exception>
+    Task<JsonElement> GetBalanceAsync(string accountId);
 }
 
 /// <summary>
@@ -46,5 +53,25 @@ public class AccountServiceClient(HttpClient httpClient, ILogger<AccountServiceC
             throw new HttpRequestException(
                 $"Account Service returned {(int)response.StatusCode}", null, response.StatusCode);
         }
+    }
+
+    /// <inheritdoc cref="IAccountServiceClient.GetBalanceAsync"/>
+    public async Task<JsonElement> GetBalanceAsync(string accountId)
+    {
+        var response = await httpClient.GetAsync($"/accounts/{accountId}/balance");
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            logger.LogWarning(
+                "Account Service returned {StatusCode} for balance query on {AccountId}: {Body}",
+                (int)response.StatusCode,
+                accountId,
+                body);
+            throw new HttpRequestException(
+                $"Account Service returned {(int)response.StatusCode}", null, response.StatusCode);
+        }
+
+        return (await response.Content.ReadFromJsonAsync<JsonElement>())!;
     }
 }

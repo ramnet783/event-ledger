@@ -1,10 +1,13 @@
 using System.Diagnostics.Metrics;
+using System.Net;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using EventGateway.Data;
 using EventGateway.Diagnostics;
 using EventGateway.Models;
 using EventGateway.Services;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Http.Resilience;
@@ -44,7 +47,7 @@ builder.Services.AddOpenTelemetry()
         .SetResourceBuilder(resourceBuilder)
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
-        .AddConsoleExporter())
+        .AddOtlpExporter())
     .WithMetrics(metrics => metrics
         .SetResourceBuilder(resourceBuilder)
         .AddMeter("EventLedger.Gateway")
@@ -85,6 +88,28 @@ builder.Services.AddHttpClient<IAccountServiceClient, AccountServiceClient>(clie
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<GatewayDbContext>("database");
 
+// Fixed-window rate limiter — 60 requests per minute per client IP on POST /events.
+// Limits configurable via RateLimit:PermitLimit / RateLimit:WindowSeconds for testing.
+builder.Services.AddRateLimiter(options =>
+{
+    options.OnRejected = async (context, _) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.HttpContext.Response.Headers.RetryAfter =
+            builder.Configuration.GetValue<int>("RateLimit:WindowSeconds", 60).ToString();
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { error = "Rate limit exceeded — too many requests. Please retry after the window resets." });
+    };
+    options.AddFixedWindowLimiter("fixed", opt =>
+    {
+        opt.PermitLimit = builder.Configuration.GetValue<int>("RateLimit:PermitLimit", 60);
+        opt.Window = TimeSpan.FromSeconds(
+            builder.Configuration.GetValue<int>("RateLimit:WindowSeconds", 60));
+        opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        opt.QueueLimit = 0;
+    });
+});
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
@@ -108,6 +133,8 @@ app.UseExceptionHandler(exceptionApp =>
         await context.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred" });
     }));
 
+app.UseRateLimiter();
+
 app.MapGet("/health", async (HealthCheckService hcs) =>
 {
     var report = await hcs.CheckHealthAsync();
@@ -118,11 +145,16 @@ app.MapGet("/health", async (HealthCheckService hcs) =>
 
 // POST /events — validate, deduplicate, persist, forward to Account Service
 app.MapPost("/events", async (
-    EventRequest req,
+    EventRequest? req,
     GatewayDbContext db,
     IAccountServiceClient accountClient,
     ILogger<Program> logger) =>
 {
+    if (req is null)
+    {
+        return Results.BadRequest(new { error = "Request body is required" });
+    }
+
     if (string.IsNullOrWhiteSpace(req.EventId))
     {
         return Results.BadRequest(new { error = "eventId is required" });
@@ -198,6 +230,15 @@ app.MapPost("/events", async (
         logger.LogInformation("Event {EventId} applied to account {AccountId}", ev.EventId, ev.AccountId);
         return Results.Created($"/events/{ev.EventId}", ev);
     }
+    catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
+    {
+        // 400 from Account Service = contract mismatch — Gateway validated the same fields,
+        // so this should never happen. Treat as internal misconfiguration, not a service outage.
+        logger.LogError(ex, "Contract mismatch: Account Service rejected event {EventId} with 400", ev.EventId);
+        return Results.Json(
+            new { error = "Internal error: request rejected by Account Service", eventId = ev.EventId },
+            statusCode: 500);
+    }
     catch (Exception ex)
     {
         // Circuit open, timeout, or Account Service error — event saved as PENDING
@@ -207,7 +248,7 @@ app.MapPost("/events", async (
             new { error = "Account Service unavailable", eventId = ev.EventId },
             statusCode: 503);
     }
-});
+}).RequireRateLimiting("fixed");
 
 // GET /events/{id} — reads only from Gateway DB, works when Account Service is down
 app.MapGet("/events/{id}", async (string id, GatewayDbContext db) =>
@@ -234,6 +275,30 @@ app.MapGet("/events", async (string? account, GatewayDbContext db) =>
         .ToList();
 
     return Results.Ok(events);
+});
+
+// GET /accounts/{accountId}/balance — proxies to Account Service; 503 if AS is unreachable
+app.MapGet("/accounts/{accountId}/balance", async (
+    string accountId,
+    IAccountServiceClient accountClient,
+    ILogger<Program> logger) =>
+{
+    try
+    {
+        var balance = await accountClient.GetBalanceAsync(accountId);
+        return Results.Ok(balance);
+    }
+    catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+    {
+        return Results.NotFound(new { error = $"Account {accountId} not found" });
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Account Service unavailable for balance query on {AccountId}", accountId);
+        return Results.Json(
+            new { error = "Account Service unavailable — balance cannot be retrieved" },
+            statusCode: 503);
+    }
 });
 
 app.Run();
