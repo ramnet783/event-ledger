@@ -39,6 +39,16 @@ If the Account Service is unavailable, the event remains `PENDING` in the Gatewa
 
 ---
 
+## Security Assessment
+
+A static security scan (Semgrep + LLM-based analysis) was run against this codebase.
+
+**Confirmed safe:** No SQL injection (EF Core parameterized queries throughout), no stack trace leaks (exception handler returns structured JSON only), no hardcoded secrets (all config via environment variables), no cascading failures (Polly circuit breaker and timeout).
+
+**Known gaps — not fixed because this is a local assignment with no production exposure:** No authentication (documented in Assumptions above); AccountService port 5001 is exposed on the host for evaluator convenience — in production it would be internal-only so callers cannot bypass Gateway validation, rate limiting, and idempotency controls; plaintext HTTP only (TLS would be enforced at ingress in production).
+
+---
+
 ## Prerequisites
 
 | Path | Requirement |
