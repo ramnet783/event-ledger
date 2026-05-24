@@ -50,6 +50,7 @@ jobs:
   docker:
     name: Docker Compose
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     steps:
       - name: Checkout

@@ -120,6 +120,9 @@ public class ResiliencyTests
         listener.SetMeasurementEventCallback<long>(
             (_, measurement, _, _) => Interlocked.Add(ref captured, measurement));
         listener.Start();
+        // Snapshot baseline after starting — parallel tests may have already incremented
+        // the global meter. We only care that THIS test's failing call did not increment it.
+        long baseline = Volatile.Read(ref captured);
 
         var mock = new Mock<IAccountServiceClient>();
         mock.Setup(c => c.ApplyTransactionAsync(It.IsAny<EventRecord>()))
@@ -130,7 +133,7 @@ public class ResiliencyTests
 
         await client.PostAsJsonAsync("/events", Payload());
 
-        Assert.Equal(0L, Volatile.Read(ref captured));
+        Assert.Equal(baseline, Volatile.Read(ref captured));
     }
 
     [Fact]
