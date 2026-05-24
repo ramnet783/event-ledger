@@ -26,6 +26,19 @@ If the Account Service is unavailable, the event remains `PENDING` in the Gatewa
 
 ---
 
+## Assumptions
+
+| Assumption | Rationale |
+|------------|-----------|
+| SQLite for persistence | Keeps the setup self-contained — no external database required to run or test. In production this would be replaced with a network-attached database. |
+| No authentication | The Gateway would sit behind an API gateway or load balancer enforcing auth (mTLS, JWT, API key) in production. Adding it at the application layer was intentionally deferred to keep scope focused on transactional and resiliency behaviour. |
+| In-process rate limiter | The fixed-window limiter is per-pod. In a horizontally scaled deployment, a shared Redis-backed limiter or API gateway layer would be needed for a true global limit. |
+| PENDING events not auto-retried | Events that fail to reach Account Service stay `PENDING`. A background reconciliation job would pick these up in production. Callers can retry with the same `eventId` safely. |
+| Gateway crash between apply and status update | If the Gateway crashes after Account Service applies a transaction but before updating status to `APPLIED`, the event remains `PENDING` in the Gateway DB. This is the two-phase commit problem — resolving it fully requires an outbox pattern or saga, which is out of scope here. |
+| Currency not ISO-validated | The `currency` field accepts any non-empty string. ISO 4217 validation would be added in production. |
+
+---
+
 ## Prerequisites
 
 | Path | Requirement |
