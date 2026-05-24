@@ -1,0 +1,856 @@
+{
+  "info": {
+    "name": "Event Ledger API",
+    "_postman_id": "event-ledger-collection",
+    "description": "Complete API collection for Event Ledger.\n\nStart services before testing:\n  dotnet run --project src/AccountService -- --urls http://localhost:5001\n  dotnet run --project src/EventGateway -- --urls http://localhost:5000\n\nOr: docker compose up",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "gateway_url",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "account_url",
+      "value": "http://localhost:5001",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Event Gateway",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{gateway_url}}/health",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 Healthy",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"healthy\",\n  \"database\": \"ok\"\n}"
+            },
+            {
+              "name": "503 DB unavailable",
+              "status": "Service Unavailable",
+              "code": 503,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"unhealthy\",\n  \"database\": \"unavailable\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events \u2014 CREDIT (201 Created)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-001\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 150.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:02:11Z\",\n  \"metadata\": { \"source\": \"mainframe-batch\", \"batchId\": \"B-9042\" }\n}"
+            },
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"eventId\": \"evt-001\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 150.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:02:11Z\",\n  \"metadata\": \"{\\\"source\\\":\\\"mainframe-batch\\\",\\\"batchId\\\":\\\"B-9042\\\"}\",\n  \"receivedAt\": \"2026-05-23T10:00:00Z\",\n  \"status\": \"APPLIED\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events \u2014 DEBIT (201 Created)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-002\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"DEBIT\",\n  \"amount\": 50.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-14T10:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"eventId\": \"evt-002\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"DEBIT\",\n  \"amount\": 50.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-14T10:00:00Z\",\n  \"receivedAt\": \"2026-05-23T10:00:01Z\",\n  \"status\": \"APPLIED\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events \u2014 out-of-order timestamp (201 Created)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-003\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 200.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-01T08:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created \u2014 earlier timestamp accepted, listing will sort correctly",
+              "status": "Created",
+              "code": 201,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"eventId\": \"evt-003\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 200.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-01T08:00:00Z\",\n  \"receivedAt\": \"2026-05-23T10:00:02Z\",\n  \"status\": \"APPLIED\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events \u2014 duplicate eventId idempotency (200 OK)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-001\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 150.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:02:11Z\"\n}"
+            },
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 original event returned, Account Service NOT called, balance unchanged",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"eventId\": \"evt-001\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 150.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:02:11Z\",\n  \"receivedAt\": \"2026-05-23T10:00:00Z\",\n  \"status\": \"APPLIED\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events \u2014 missing eventId (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 100.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"eventId is required\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events \u2014 missing accountId (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-x\",\n  \"type\": \"CREDIT\",\n  \"amount\": 100.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"accountId is required\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events \u2014 amount = 0 (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-x\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 0,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"amount must be greater than 0\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events \u2014 negative amount (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-x\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"DEBIT\",\n  \"amount\": -50.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"amount must be greater than 0\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events \u2014 invalid type (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-x\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"TRANSFER\",\n  \"amount\": 100.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"type must be CREDIT or DEBIT\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events \u2014 circuit breaker open / Account Service down (503)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-cb-001\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 75.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-20T09:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "503 Service Unavailable \u2014 event saved as PENDING, GET endpoints still work",
+              "status": "Service Unavailable",
+              "code": 503,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Account Service unavailable\",\n  \"eventId\": \"evt-cb-001\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /events/{id} \u2014 found (200)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{gateway_url}}/events/evt-001",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events",
+                "evt-001"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"eventId\": \"evt-001\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 150.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:02:11Z\",\n  \"receivedAt\": \"2026-05-23T10:00:00Z\",\n  \"status\": \"APPLIED\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /events/{id} \u2014 not found (404)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{gateway_url}}/events/evt-999",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events",
+                "evt-999"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Event not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /events?account= \u2014 ordered by eventTimestamp (200)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{gateway_url}}/events?account=acct-123",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "account",
+                  "value": "acct-123"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 sorted by eventTimestamp ascending regardless of arrival order",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  { \"eventId\": \"evt-003\", \"type\": \"CREDIT\", \"amount\": 200.00, \"eventTimestamp\": \"2026-05-01T08:00:00Z\", \"status\": \"APPLIED\" },\n  { \"eventId\": \"evt-002\", \"type\": \"DEBIT\",  \"amount\": 50.00,  \"eventTimestamp\": \"2026-05-14T10:00:00Z\", \"status\": \"APPLIED\" },\n  { \"eventId\": \"evt-001\", \"type\": \"CREDIT\", \"amount\": 150.00, \"eventTimestamp\": \"2026-05-15T14:02:11Z\", \"status\": \"APPLIED\" }\n]"
+            }
+          ]
+        },
+        {
+          "name": "GET /events \u2014 missing account param (400)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{gateway_url}}/events",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"account query parameter is required\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /accounts/{accountId}/balance \u2014 balance via Gateway (200)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_url}}/accounts/acct-123/balance",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "accounts",
+                "acct-123",
+                "balance"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /accounts/{accountId}/balance \u2014 Account Service down (503)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_url}}/accounts/acct-unreachable/balance",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "accounts",
+                "acct-unreachable",
+                "balance"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Account Service",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{account_url}}/health",
+              "host": [
+                "{{account_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 Healthy",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"healthy\",\n  \"database\": \"ok\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /accounts/{accountId}/transactions \u2014 CREDIT (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-001\",\n  \"type\": \"CREDIT\",\n  \"amount\": 150.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:02:11Z\"\n}"
+            },
+            "url": {
+              "raw": "{{account_url}}/accounts/acct-123/transactions",
+              "host": [
+                "{{account_url}}"
+              ],
+              "path": [
+                "accounts",
+                "acct-123",
+                "transactions"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created \u2014 account auto-created on first transaction",
+              "status": "Created",
+              "code": 201,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"eventId\": \"evt-001\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 150.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:02:11Z\",\n  \"receivedAt\": \"2026-05-23T10:00:00Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /accounts/{accountId}/transactions \u2014 duplicate eventId (200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-001\",\n  \"type\": \"CREDIT\",\n  \"amount\": 150.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:02:11Z\"\n}"
+            },
+            "url": {
+              "raw": "{{account_url}}/accounts/acct-123/transactions",
+              "host": [
+                "{{account_url}}"
+              ],
+              "path": [
+                "accounts",
+                "acct-123",
+                "transactions"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 original transaction returned, balance unchanged",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"eventId\": \"evt-001\",\n  \"accountId\": \"acct-123\",\n  \"type\": \"CREDIT\",\n  \"amount\": 150.00,\n  \"currency\": \"USD\",\n  \"eventTimestamp\": \"2026-05-15T14:02:11Z\",\n  \"receivedAt\": \"2026-05-23T10:00:00Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /accounts/{accountId}/balance \u2014 found (200)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{account_url}}/accounts/acct-123/balance",
+              "host": [
+                "{{account_url}}"
+              ],
+              "path": [
+                "accounts",
+                "acct-123",
+                "balance"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 balance = SUM(CREDITs) - SUM(DEBITs)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"accountId\": \"acct-123\",\n  \"balance\": 300.00,\n  \"currency\": \"USD\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /accounts/{accountId}/balance \u2014 not found (404)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{account_url}}/accounts/acct-unknown/balance",
+              "host": [
+                "{{account_url}}"
+              ],
+              "path": [
+                "accounts",
+                "acct-unknown",
+                "balance"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Account acct-unknown not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /accounts/{accountId} \u2014 details with transactions (200)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{account_url}}/accounts/acct-123",
+              "host": [
+                "{{account_url}}"
+              ],
+              "path": [
+                "accounts",
+                "acct-123"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 20 most recent transactions ordered by eventTimestamp descending",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"accountId\": \"acct-123\",\n  \"createdAt\": \"2026-05-23T10:00:00Z\",\n  \"transactions\": [\n    { \"eventId\": \"evt-001\", \"type\": \"CREDIT\", \"amount\": 150.00, \"eventTimestamp\": \"2026-05-15T14:02:11Z\" },\n    { \"eventId\": \"evt-002\", \"type\": \"DEBIT\",  \"amount\": 50.00,  \"eventTimestamp\": \"2026-05-14T10:00:00Z\" },\n    { \"eventId\": \"evt-003\", \"type\": \"CREDIT\", \"amount\": 200.00, \"eventTimestamp\": \"2026-05-01T08:00:00Z\" }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /accounts/{accountId} \u2014 not found (404)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{account_url}}/accounts/acct-unknown",
+              "host": [
+                "{{account_url}}"
+              ],
+              "path": [
+                "accounts",
+                "acct-unknown"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Account acct-unknown not found\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
