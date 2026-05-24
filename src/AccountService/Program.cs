@@ -28,7 +28,7 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing
         .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("account-service"))
         .AddAspNetCoreInstrumentation()
-        .AddConsoleExporter());
+        .AddOtlpExporter());
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AccountDbContext>("database");
@@ -67,10 +67,15 @@ app.MapGet("/health", async (HealthCheckService hcs) =>
 // Idempotent on eventId — duplicate submissions return the original transaction unchanged
 app.MapPost("/accounts/{accountId}/transactions", async (
     string accountId,
-    TransactionRequest req,
+    TransactionRequest? req,
     AccountDbContext db,
     ILogger<Program> logger) =>
 {
+    if (req is null)
+    {
+        return Results.BadRequest(new { error = "Request body is required" });
+    }
+
     if (string.IsNullOrWhiteSpace(req.EventId))
     {
         return Results.BadRequest(new { error = "eventId is required" });
@@ -84,6 +89,11 @@ app.MapPost("/accounts/{accountId}/transactions", async (
     if (req.Amount <= 0)
     {
         return Results.BadRequest(new { error = "amount must be greater than 0" });
+    }
+
+    if (string.IsNullOrWhiteSpace(req.Currency))
+    {
+        return Results.BadRequest(new { error = "currency is required" });
     }
 
     if (req.EventTimestamp is null)
