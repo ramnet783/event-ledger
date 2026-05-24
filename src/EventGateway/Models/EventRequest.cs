@@ -14,5 +14,5 @@ public record EventRequest(
     string? Type,
     decimal Amount,
     string? Currency,
-    DateTimeOffset EventTimestamp,
+    DateTimeOffset? EventTimestamp,
     Dictionary<string, object?>? Metadata);

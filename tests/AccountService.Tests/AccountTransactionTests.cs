@@ -104,6 +104,18 @@ public class AccountTransactionTests : IClassFixture<AccountTransactionTests.Fac
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Fact]
+    public async Task PostTransaction_MissingEventTimestamp_Returns400()
+    {
+        var response = await _client.PostAsJsonAsync(
+            $"/accounts/{Guid.NewGuid()}/transactions",
+            new { eventId = Guid.NewGuid().ToString(), type = "CREDIT", amount = 100m, currency = "USD", eventTimestamp = (DateTimeOffset?)null });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("eventTimestamp is required", body.GetProperty("error").GetString());
+    }
+
     // ── POST — idempotency ────────────────────────────────────────────────
 
     [Fact]

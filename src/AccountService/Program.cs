@@ -86,6 +86,11 @@ app.MapPost("/accounts/{accountId}/transactions", async (
         return Results.BadRequest(new { error = "amount must be greater than 0" });
     }
 
+    if (req.EventTimestamp is null)
+    {
+        return Results.BadRequest(new { error = "eventTimestamp is required" });
+    }
+
     var existing = await db.Transactions.FirstOrDefaultAsync(t => t.EventId == req.EventId);
     if (existing != null)
     {
@@ -107,7 +112,7 @@ app.MapPost("/accounts/{accountId}/transactions", async (
         Type = req.Type,
         Amount = req.Amount,
         Currency = req.Currency,
-        EventTimestamp = req.EventTimestamp,
+        EventTimestamp = req.EventTimestamp!.Value,
         ReceivedAt = DateTimeOffset.UtcNow,
     };
 

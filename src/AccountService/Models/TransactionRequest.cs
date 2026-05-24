@@ -11,4 +11,4 @@ public record TransactionRequest(
     string Type,
     decimal Amount,
     string Currency,
-    DateTimeOffset EventTimestamp);
+    DateTimeOffset? EventTimestamp);

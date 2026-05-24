@@ -148,6 +148,11 @@ app.MapPost("/events", async (
         return Results.BadRequest(new { error = "currency is required" });
     }
 
+    if (req.EventTimestamp is null)
+    {
+        return Results.BadRequest(new { error = "eventTimestamp is required" });
+    }
+
     // Idempotency — return original event without calling Account Service again
     var existing = await db.Events.FindAsync(req.EventId);
     if (existing != null)
@@ -163,7 +168,7 @@ app.MapPost("/events", async (
         Type = req.Type!,
         Amount = req.Amount,
         Currency = req.Currency!,
-        EventTimestamp = req.EventTimestamp,
+        EventTimestamp = req.EventTimestamp!.Value,
         Metadata = req.Metadata != null ? JsonSerializer.Serialize(req.Metadata) : null,
         ReceivedAt = DateTimeOffset.UtcNow,
         Status = "PENDING",
