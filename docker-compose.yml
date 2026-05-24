@@ -1,0 +1,52 @@
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+  account-service:
+    build:
+      context: .
+      dockerfile: src/AccountService/Dockerfile
+    ports:
+      - "5001:8080"
+    volumes:
+      - account-data:/data
+    environment:
+      - ConnectionStrings__DefaultConnection=Data Source=/data/account.db
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  event-gateway:
+    build:
+      context: .
+      dockerfile: src/EventGateway/Dockerfile
+    ports:
+      - "5000:8080"
+    volumes:
+      - gateway-data:/data
+    environment:
+      - ConnectionStrings__DefaultConnection=Data Source=/data/gateway.db
+      - AccountService__BaseUrl=http://account-service:8080
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      account-service:
+        condition: service_healthy
+
+volumes:
+  account-data:
+  gateway-data:
