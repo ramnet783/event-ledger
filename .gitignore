@@ -5,6 +5,7 @@
 bin/
 obj/
 *.user
+TestResults/
 
 # SQLite databases (runtime files)
 *.db

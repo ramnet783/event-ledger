@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test with coverage
+        run: |
+          dotnet test --no-build --configuration Release \
+            --logger "trx;LogFileName=test-results.trx" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: TestResults/**/coverage.cobertura.xml
+
+  docker:
+    name: Docker Compose
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and start services
+        run: docker compose up --build -d
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "Waiting for services..."
+          for i in $(seq 1 15); do
+            gw=$(curl -sf http://localhost:5000/health && echo ok || echo fail)
+            as=$(curl -sf http://localhost:5001/health && echo ok || echo fail)
+            if [ "$gw" = "ok" ] && [ "$as" = "ok" ]; then
+              echo "Both services healthy"
+              exit 0
+            fi
+            echo "Attempt $i — gateway=$gw account=$as"
+            sleep 3
+          done
+          echo "Services did not become healthy in time"
+          docker compose logs
+          exit 1
+
+      - name: Smoke test — POST event and check balance
+        run: |
+          response=$(curl -sf -X POST http://localhost:5000/events \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "eventId": "ci-smoke-001",
+              "accountId": "ci-acc-001",
+              "type": "CREDIT",
+              "amount": 100.00,
+              "currency": "USD",
+              "eventTimestamp": "2024-01-15T10:00:00Z"
+            }')
+          echo "POST /events: $response"
+          echo "$response" | grep -q '"status":"APPLIED"' || { echo "Expected APPLIED status"; exit 1; }
+
+          balance=$(curl -sf http://localhost:5000/accounts/ci-acc-001/balance)
+          echo "GET balance: $balance"
+          echo "$balance" | grep -q '"balance":100' || { echo "Expected balance 100"; exit 1; }
+
+      - name: Tear down
+        if: always()
+        run: docker compose down
