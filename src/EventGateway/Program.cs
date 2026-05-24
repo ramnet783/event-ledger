@@ -221,10 +221,12 @@ app.MapGet("/events", async (string? account, GatewayDbContext db) =>
         return Results.BadRequest(new { error = "account query parameter is required" });
     }
 
-    var events = await db.Events
+    // SQLite can't translate DateTimeOffset in ORDER BY — sort after loading
+    var events = (await db.Events
         .Where(e => e.AccountId == account)
+        .ToListAsync())
         .OrderBy(e => e.EventTimestamp)
-        .ToListAsync();
+        .ToList();
 
     return Results.Ok(events);
 });

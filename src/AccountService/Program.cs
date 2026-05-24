@@ -152,13 +152,21 @@ app.MapGet("/accounts/{accountId}/balance", async (string accountId, AccountDbCo
 // Account details with 20 most recent transactions ordered by event timestamp
 app.MapGet("/accounts/{accountId}", async (string accountId, AccountDbContext db) =>
 {
-    var account = await db.Accounts
-        .Include(a => a.Transactions.OrderByDescending(t => t.EventTimestamp).Take(20))
-        .FirstOrDefaultAsync(a => a.AccountId == accountId);
+    var account = await db.Accounts.FirstOrDefaultAsync(a => a.AccountId == accountId);
+    if (account is null)
+    {
+        return Results.NotFound(new { error = $"Account {accountId} not found" });
+    }
 
-    return account is null
-        ? Results.NotFound(new { error = $"Account {accountId} not found" })
-        : Results.Ok(account);
+    // SQLite can't translate DateTimeOffset in ORDER BY — sort after loading
+    account.Transactions = (await db.Transactions
+        .Where(t => t.AccountId == accountId)
+        .ToListAsync())
+        .OrderByDescending(t => t.EventTimestamp)
+        .Take(20)
+        .ToList();
+
+    return Results.Ok(account);
 });
 
 app.Run();
